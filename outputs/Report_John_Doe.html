@@ -1,0 +1,64 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Diabetic Retinopathy Diagnostic Report</title>
+        <style>
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 30px; color: #2b2d42; }
+            .header { text-align: center; border-bottom: 3px solid #3a86ef; padding-bottom: 10px; margin-bottom: 20px; }
+            .header h1 { color: #1d3557; margin-bottom: 5px; }
+            .header p { color: #6c757d; font-size: 14px; margin: 0; }
+            .patient-box { background: #f8f9fa; border-left: 5px solid #3a86ef; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+            .grid { display: flex; gap: 20px; margin-bottom: 20px; }
+            .col { flex: 1; }
+            .badge { display: inline-block; padding: 6px 12px; color: #fff; font-weight: bold; border-radius: 20px; font-size: 14px; background: #ffbf00; }
+            .section-title { border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #1d3557; margin-top: 25px; }
+            ul { line-height: 1.6; }
+            .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #adb5bd; border-top: 1px solid #dee2e6; padding-top: 15px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Ophthalmic Diagnostic Report</h1>
+            <p>Automated Retinal Scanning & Diabetic Retinopathy Assessment System</p>
+        </div>
+
+        <div class="patient-box">
+            <div class="grid">
+                <div class="col">
+                    <strong>Patient ID / Name:</strong> John Doe<br>
+                    <strong>Age / Sex:</strong> 52 / Male<br>
+                </div>
+                <div class="col">
+                    <strong>Scan Date:</strong> 2026-08-27 14:27:47<br>
+                    <strong>Eye Examined:</strong> Right Eye (OD)<br>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="section-title">Diagnostic Classification</h3>
+        <p>
+            <strong>Severity Stage:</strong> <span class="badge">Grade 1: Mild Non-Proliferative DR (NPDR)</span><br><br>
+            <strong>Confidence Score:</strong> 89.5%<br>
+            <strong>Risk Assessment:</strong> Mild Risk / Close Monitoring<br>
+            <strong>Clinical Summary:</strong> Presence of isolated microaneurysms only. Small vessel dilation observed.
+        </p>
+
+        <h3 class="section-title">Evidence-Based Treatment Protocol & Clinical Plan</h3>
+        <p><strong>Follow-Up Schedule:</strong> Follow-up screening within 6 to 12 months.</p>
+        <p><strong>Glycemic & Systemic Target:</strong> Strict HbA1c target < 7.0%, aggressive blood pressure control (< 130/80 mmHg).</p>
+        
+        <h4>Recommended Clinical Actions:</h4>
+        <ul>
+            <li>Schedule follow-up dilated fundus evaluation within 6–12 months.</li><li>Review diabetic management plan with endocrinologist or primary care physician.</li><li>Monitor lipid levels (statins as indicated by PCP).</li><li>Patient counseling regarding early signs of visual changes (floaters, blurriness).</li>
+        </ul>
+
+        <p><strong>Medication & Laser Therapy Guidance:</strong><br>No intraocular injections or laser therapy indicated at this stage.</p>
+
+        <div class="footer">
+            <p>This automated report was generated using Computer Vision & PyTorch Deep Learning. Clinical decisions should be confirmed by a board-certified ophthalmologist.</p>
+        </div>
+    </body>
+    </html>
+    
