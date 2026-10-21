@@ -25,6 +25,17 @@ class VideoProcessor:
         self.model = load_dr_model(model_path=model_path, num_classes=config.NUM_CLASSES, device=self.device)
         self.grad_cam = GradCAM(self.model)
 
+        # Load Classical Biomarker ML Ensemble (Random Forest + HistGradientBoosting)
+        self.rf_model = None
+        rf_path = getattr(config, 'CLASSICAL_MODEL_PATH', os.path.join(config.MODEL_DIR, 'classical_rf_model.pkl'))
+        if os.path.exists(rf_path):
+            try:
+                import joblib
+                self.rf_model = joblib.load(rf_path)
+                print(f"Loaded Classical Biomarker ML Ensemble successfully from {rf_path}")
+            except Exception as e:
+                print(f"Notice: Could not load classical RF model: {e}")
+
         # Load Video-Trained Neural Network (CNN + Bi-LSTM)
         self.video_model = None
         video_model_p = getattr(config, 'VIDEO_MODEL_PATH', os.path.join(config.MODEL_DIR, 'dr_video_model.pth'))
@@ -40,6 +51,10 @@ class VideoProcessor:
 
         # Prediction voting history
         self.voting_history = deque(maxlen=config.STABILITY_WINDOW)
+
+    def reset_history(self):
+        """Clears temporal frame voting deque."""
+        self.voting_history.clear()
 
     def predict_video_sequence(self, raw_frames, num_frames=16):
         """
@@ -67,9 +82,14 @@ class VideoProcessor:
         video_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            logits, attn = self.video_model(video_tensor)
-            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
-            attn_weights = attn.squeeze(0).squeeze(-1).cpu().numpy()
+            # Video Temporal Test-Time Augmentation (Original + Horizontal Flip)
+            video_tensor_flip = torch.flip(video_tensor, dims=[4])
+            logits_orig, attn_orig = self.video_model(video_tensor)
+            logits_flip, attn_flip = self.video_model(video_tensor_flip)
+            
+            logits_avg = 0.5 * (logits_orig + logits_flip)
+            probs = torch.softmax(logits_avg / 1.1, dim=1).squeeze(0).cpu().numpy()
+            attn_weights = (0.5 * (attn_orig + attn_flip)).squeeze(0).squeeze(-1).cpu().numpy()
 
         pred_class = int(np.argmax(probs))
         confidence = float(probs[pred_class])
@@ -93,10 +113,11 @@ class VideoProcessor:
         is_good = laplacian_var >= config.VIDEO_FOCUS_THRESHOLD
         return is_good, float(laplacian_var)
 
-    def predict_single_frame(self, frame_bgr, generate_heatmap=True, use_tta=True):
+    def predict_single_frame(self, frame_bgr, generate_heatmap=True, use_tta=True, is_video_stream=False):
         """
-        Runs Phase 1 IVP preprocessing, Phase 2 Biomarker Extraction, PyTorch inference
-        with Test-Time Augmentation (TTA), and Clinical Hybrid Consensus to guarantee accurate diagnosis.
+        Runs Phase 1 IVP preprocessing, Phase 2 Biomarker Extraction, PyTorch Deep Learning
+        with Test-Time Augmentation (TTA), and 12-Feature Classical Biomarker ML Ensemble.
+        Combines spatial texture learning with physical clinical measurements.
         """
         # Run Phase 1 IVP Preprocessing
         res = full_ivp_pipeline(frame_bgr)
@@ -129,43 +150,32 @@ class VideoProcessor:
 
         pred_class = int(np.argmax(probs))
         confidence = float(probs[pred_class])
-        
-        # Update temporal voting
-        self.voting_history.append(probs)
 
-        # Compute voting aggregate prediction
-        avg_probs = np.mean(self.voting_history, axis=0)
+        # 12-Feature Classical Biomarker ML Ensemble prediction
+        rf_probs = None
+        if self.rf_model is not None:
+            try:
+                x_vec = np.array(list(feats.values()), dtype=np.float32).reshape(1, -1)
+                rf_probs = self.rf_model.predict_proba(x_vec)[0]
+            except Exception as e:
+                rf_probs = None
 
-        # Bayesian Likelihood Prior based on clinical physical biomarkers
-        lesion_cnt = feats.get('lesion_count', 0)
-        exudate_ratio = feats.get('exudate_ratio', 0.0)
-        csme_risk = feats.get('csme_risk', False)
-        
-        bayes_prior = np.ones(5, dtype=np.float32)
-        if lesion_cnt == 0 and exudate_ratio == 0.0:
-            bayes_prior[0] = 2.4
-            bayes_prior[1] = 0.8
-            bayes_prior[2] = 0.05
-            bayes_prior[3] = 0.01
-            bayes_prior[4] = 0.01
-        elif lesion_cnt <= 6 and exudate_ratio < 0.003:
-            bayes_prior[0] = 0.3
-            bayes_prior[1] = 2.4
-            bayes_prior[2] = 1.0
-            bayes_prior[3] = 0.05
-            bayes_prior[4] = 0.02
-        elif (lesion_cnt >= 25 or exudate_ratio >= 0.012 or csme_risk):
-            bayes_prior[0] = 0.01
-            bayes_prior[1] = 0.05
-            bayes_prior[2] = 1.4
-            bayes_prior[3] = 2.2
-            bayes_prior[4] = 2.2
+        # Dual-Expert Hybrid Consensus: Blend Deep Learning (40%) + Biomarker ML Ensemble (60%)
+        if rf_probs is not None:
+            ensemble_probs = 0.40 * probs + 0.60 * rf_probs
+        else:
+            ensemble_probs = probs.copy()
 
-        fused_probs = avg_probs * bayes_prior
-        fused_probs = fused_probs / np.sum(fused_probs)
+        # Temporal Voting if streaming consecutive frames of a video
+        if is_video_stream:
+            self.voting_history.append(ensemble_probs)
+            final_probs = np.mean(self.voting_history, axis=0)
+        else:
+            final_probs = ensemble_probs.copy()
 
-        final_class = int(np.argmax(fused_probs))
-        final_confidence = float(fused_probs[final_class])
+        # Ensemble consensus class and confidence
+        final_class = int(np.argmax(final_probs))
+        final_confidence = float(final_probs[final_class])
 
         heatmap_overlay = None
         if generate_heatmap:
@@ -183,7 +193,9 @@ class VideoProcessor:
             'biomarker_name': bio_name,
             'raw_class_id': pred_class,
             'raw_confidence': confidence,
-            'all_probs': avg_probs.tolist(),
+            'all_probs': final_probs.tolist(),
+            'dl_probs': probs.tolist(),
+            'biomarker_probs': rf_probs.tolist() if rf_probs is not None else None,
             'preprocessed_rgb': img_rgb,
             'heatmap_overlay': heatmap_overlay,
             'features': feats,
@@ -279,6 +291,7 @@ class VideoProcessor:
         preview_interval = max(1, total_frames // max_preview)
         target_seq_indices = set(np.linspace(0, max(0, total_frames - 1), 16, dtype=int))
 
+        self.reset_history()
         frame_idx = 0
         preview_frames = []
         video_sequence_frames = []
@@ -311,7 +324,7 @@ class VideoProcessor:
                 video_sequence_frames.append(frame.copy())
 
             if is_good and (frame_idx % sample_step == 0 or last_prediction is None):
-                last_prediction = self.predict_single_frame(frame, generate_heatmap=True)
+                last_prediction = self.predict_single_frame(frame, generate_heatmap=True, is_video_stream=True)
 
             current_grade = last_prediction['class_id'] if last_prediction else 0
             current_conf = last_prediction['confidence'] if last_prediction else 0.0
@@ -375,7 +388,7 @@ class VideoProcessor:
         final_prediction = None
         if composite_frame is not None:
             try:
-                final_prediction = self.predict_single_frame(composite_frame, generate_heatmap=True)
+                final_prediction = self.predict_single_frame(composite_frame, generate_heatmap=True, is_video_stream=False)
             except Exception as e:
                 print(f"Composite prediction fallback: {e}")
                 final_prediction = last_prediction

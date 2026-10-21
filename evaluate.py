@@ -79,7 +79,8 @@ def run_evaluation(num_samples_per_class=10, save_confusion_matrix=True):
         if img is None:
             continue
             
-        res = processor.predict_single_frame(img, generate_heatmap=False, use_tta=True)
+        processor.reset_history()
+        res = processor.predict_single_frame(img, generate_heatmap=False, use_tta=True, is_video_stream=False)
         
         y_true.append(row['gt_class'])
         y_pred.append(res['class_id'])
