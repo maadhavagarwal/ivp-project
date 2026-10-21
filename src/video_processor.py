@@ -9,6 +9,7 @@ from src import config
 from src.ivp_preprocessing import full_ivp_pipeline
 from src.feature_extraction import extract_all_ivp_features, get_biomarker_clinical_grade
 from src.model import get_model, load_dr_model, GradCAM, overlay_heatmap_on_image
+from src.video_model import RetinalVideoCNN_LSTM
 
 class VideoProcessor:
     """
@@ -19,8 +20,62 @@ class VideoProcessor:
         self.model = load_dr_model(model_path=model_path, num_classes=config.NUM_CLASSES, device=self.device)
         self.grad_cam = GradCAM(self.model)
 
+        # Load Video-Trained Neural Network (CNN + Bi-LSTM)
+        self.video_model = None
+        video_model_p = getattr(config, 'VIDEO_MODEL_PATH', os.path.join(config.MODEL_DIR, 'dr_video_model.pth'))
+        if os.path.exists(video_model_p):
+            try:
+                vm = RetinalVideoCNN_LSTM(num_classes=config.NUM_CLASSES, hidden_dim=128, lstm_layers=2, pretrained_backbone=False).to(self.device)
+                vm.load_state_dict(torch.load(video_model_p, map_location=self.device))
+                vm.eval()
+                self.video_model = vm
+                print(f"Loaded video-trained model successfully from {video_model_p}")
+            except Exception as e:
+                print(f"Notice: Could not load video model: {e}")
+
         # Prediction voting history
         self.voting_history = deque(maxlen=config.STABILITY_WINDOW)
+
+    def predict_video_sequence(self, raw_frames, num_frames=16):
+        """
+        Runs the Video-Trained Neural Network (CNN + Bi-LSTM + Temporal Attention)
+        on a multi-frame video sequence.
+        """
+        if self.video_model is None or len(raw_frames) == 0:
+            return None
+
+        indices = np.linspace(0, len(raw_frames) - 1, num_frames, dtype=int)
+        sampled_frames = [raw_frames[i] for i in indices]
+
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+
+        tensors = []
+        for f in sampled_frames:
+            rgb = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+            if rgb.shape[:2] != (224, 224):
+                rgb = cv2.resize(rgb, (224, 224))
+            norm = (rgb.astype(np.float32) / 255.0 - mean) / std
+            t = torch.tensor(norm, dtype=torch.float32).permute(2, 0, 1)
+            tensors.append(t)
+
+        video_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            logits, attn = self.video_model(video_tensor)
+            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+            attn_weights = attn.squeeze(0).squeeze(-1).cpu().numpy()
+
+        pred_class = int(np.argmax(probs))
+        confidence = float(probs[pred_class])
+
+        return {
+            'video_class_id': pred_class,
+            'video_class_name': config.CLASS_NAMES[pred_class],
+            'video_confidence': confidence,
+            'video_probs': probs.tolist(),
+            'attention_weights': attn_weights.tolist()
+        }
 
     def evaluate_frame_quality(self, frame_bgr):
         """
@@ -297,6 +352,11 @@ class VideoProcessor:
                 final_prediction = last_prediction
         else:
             final_prediction = last_prediction
+
+        # Run Video-Trained Neural Network (CNN + Bi-LSTM) on the full video sequence
+        video_seq_pred = self.predict_video_sequence(raw_frames)
+        if final_prediction is not None and video_seq_pred is not None:
+            final_prediction['video_temporal_model'] = video_seq_pred
 
         return processed_frames, final_prediction, composite_frame, frame_metrics
 

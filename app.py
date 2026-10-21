@@ -415,6 +415,10 @@ else:
                 with v_col3:
                     st.metric("Clinical Risk Level", treatment['risk_level'])
 
+                if final_pred.get('video_temporal_model') is not None:
+                    vtm = final_pred['video_temporal_model']
+                    st.info(f"🧠 **Temporal Video Model (CNN + Bi-LSTM Trained on 125 Video Clips)**: Direct Video Sequence Diagnosis = **Grade {vtm['video_class_id']} ({vtm['video_class_name']})** ({vtm['video_confidence']*100:.1f}% sequence confidence).")
+
                 # Quantitative Biomarkers of Composite Image
                 st.markdown("##### Extracted IVP Biomarkers from Composite Eye Scan:")
                 mb1, mb2, mb3, mb4, mb5, mb6 = st.columns(6)
