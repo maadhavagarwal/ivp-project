@@ -144,7 +144,7 @@ def train_classical_baseline(train_paths, train_labels, val_paths, val_labels):
                 feats, _ = extract_all_ivp_features(img)
                 X.append(list(feats.values()))
             except Exception:
-                X.append([0.0] * 8)
+                X.append([0.0] * 12)
         return np.array(X)
 
     X_train = extract_dataset_features(train_paths)

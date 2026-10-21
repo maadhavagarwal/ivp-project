@@ -193,6 +193,12 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, masks=None, alpha=0.55):
     2. Fuses Grad-CAM heatmap with detected IVP red lesions (microaneurysms) and hard exudates.
     3. Renders bright red/orange glowing highlights directly over detected lesion locations.
     """
+    h, w = orig_rgb.shape[:2]
+    
+    # Ensure heatmap matches orig_rgb dimensions
+    if heatmap.shape[:2] != (h, w):
+        heatmap = cv2.resize(heatmap, (w, h))
+
     # Create retina circle mask (exclude dark background corners)
     gray = cv2.cvtColor(orig_rgb, cv2.COLOR_RGB2GRAY)
     _, retina_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
@@ -210,12 +216,16 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, masks=None, alpha=0.55):
         # Microaneurysms / Red Lesions
         if 'red_lesions' in masks and masks['red_lesions'] is not None:
             r_lesions = masks['red_lesions']
+            if r_lesions.shape[:2] != (h, w):
+                r_lesions = cv2.resize(r_lesions, (w, h), interpolation=cv2.INTER_NEAREST)
             dilated_r = cv2.dilate(r_lesions, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
             lesion_map[dilated_r > 0] = 1.0
             
         # Hard Exudates
         if 'exudates' in masks and masks['exudates'] is not None:
             ex = masks['exudates']
+            if ex.shape[:2] != (h, w):
+                ex = cv2.resize(ex, (w, h), interpolation=cv2.INTER_NEAREST)
             dilated_ex = cv2.dilate(ex, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
             lesion_map[dilated_ex > 0] = 1.0
             

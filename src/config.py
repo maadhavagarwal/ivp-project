@@ -12,6 +12,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 MODEL_PATH = os.path.join(MODEL_DIR, "dr_model.pth")
 CLASSICAL_MODEL_PATH = os.path.join(MODEL_DIR, "classical_rf_model.pkl")
+RF_MODEL_PATH = CLASSICAL_MODEL_PATH
 
 # Output Directory for Processed Images / Reports
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")

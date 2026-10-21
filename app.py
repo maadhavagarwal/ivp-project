@@ -345,6 +345,10 @@ else:
     elif use_sample_vid and os.path.exists(sample_video_path):
         video_to_process = sample_video_path
 
+    if 'current_video' not in st.session_state or st.session_state['current_video'] != video_to_process:
+        st.session_state['current_video'] = video_to_process
+        st.session_state['video_results'] = None
+
     if video_to_process is not None:
         st.video(video_to_process)
         
@@ -354,114 +358,128 @@ else:
                 processed_frames, final_pred, composite_frame, frame_metrics = processor.process_video_file(
                     video_to_process, output_path=output_video_path
                 )
-                
+                st.session_state['video_results'] = {
+                    'processed_frames': processed_frames,
+                    'final_pred': final_pred,
+                    'composite_frame': composite_frame,
+                    'frame_metrics': frame_metrics,
+                    'output_video_path': output_video_path
+                }
                 st.success(f"Video analysis complete! Processed {len(processed_frames)} frames successfully.")
+
+        if st.session_state.get('video_results') is not None:
+            vr = st.session_state['video_results']
+            processed_frames = vr['processed_frames']
+            final_pred = vr['final_pred']
+            composite_frame = vr['composite_frame']
+            frame_metrics = vr['frame_metrics']
+            output_video_path = vr['output_video_path']
+            
+            # -----------------------------------------------------------------
+            # 1. Reconstructed Super-Resolution Composite Frame
+            # -----------------------------------------------------------------
+            st.markdown("---")
+            st.subheader("🖼️ Reconstructed Multi-Frame Super-Resolution Composite")
+            st.markdown("Multi-frame feature registration matches keypoints across valid frames with RANSAC Homography, eliminating motion blur and sensor noise.")
+            
+            if composite_frame is not None:
+                c_col1, c_col2 = st.columns(2)
+                with c_col1:
+                    st.markdown("**1. Super-Resolution Composite Fundus**")
+                    st.image(cv2.cvtColor(composite_frame, cv2.COLOR_BGR2RGB), caption="Feature-Registered Noise-Free Composite", use_container_width=True)
+                with c_col2:
+                    st.markdown("**2. Composite Grad-CAM Lesion Heatmap**")
+                    if final_pred and final_pred.get('heatmap_overlay') is not None:
+                        st.image(final_pred['heatmap_overlay'], caption="Multi-Frame Attention Heatmap", use_container_width=True)
+
+            # -----------------------------------------------------------------
+            # 2. Video Multi-Frame Aggregate Diagnosis & Treatment
+            # -----------------------------------------------------------------
+            if final_pred:
+                feats = final_pred.get('features', {})
+                treatment = get_treatment_advisory(final_pred['class_id'], csme_risk=feats.get('csme_risk', False))
                 
-                # -----------------------------------------------------------------
-                # 1. Reconstructed Super-Resolution Composite Frame
-                # -----------------------------------------------------------------
                 st.markdown("---")
-                st.subheader("🖼️ Reconstructed Multi-Frame Super-Resolution Composite")
-                st.markdown("Multi-frame feature registration matches keypoints across valid frames with RANSAC Homography, eliminating motion blur and sensor noise.")
-                
-                if composite_frame is not None:
-                    c_col1, c_col2 = st.columns(2)
-                    with c_col1:
-                        st.markdown("**1. Super-Resolution Composite Fundus**")
-                        st.image(cv2.cvtColor(composite_frame, cv2.COLOR_BGR2RGB), caption="Feature-Registered Noise-Free Composite", use_container_width=True)
-                    with c_col2:
-                        st.markdown("**2. Composite Grad-CAM Lesion Heatmap**")
-                        if final_pred and final_pred.get('heatmap_overlay') is not None:
-                            st.image(final_pred['heatmap_overlay'], caption="Multi-Frame Attention Heatmap", use_container_width=True)
+                st.subheader("🏥 Video Multi-Frame Aggregate Clinical Diagnosis")
+                v_col1, v_col2, v_col3 = st.columns(3)
+                with v_col1:
+                    badge_color = treatment['color_badge']
+                    st.markdown(f"""
+                    <div style="background-color: {badge_color}; padding: 15px; border-radius: 8px; color: white; text-align: center;">
+                        <h3 style="margin:0;">{treatment['severity_title']}</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with v_col2:
+                    st.metric("Multi-Frame Consensus Confidence", f"{final_pred['confidence']*100:.1f}%")
+                    st.progress(float(final_pred['confidence']))
+                with v_col3:
+                    st.metric("Clinical Risk Level", treatment['risk_level'])
 
-                # -----------------------------------------------------------------
-                # 2. Video Multi-Frame Aggregate Diagnosis & Treatment
-                # -----------------------------------------------------------------
-                if final_pred:
-                    feats = final_pred.get('features', {})
-                    treatment = get_treatment_advisory(final_pred['class_id'], csme_risk=feats.get('csme_risk', False))
-                    
-                    st.markdown("---")
-                    st.subheader("🏥 Video Multi-Frame Aggregate Clinical Diagnosis")
-                    v_col1, v_col2, v_col3 = st.columns(3)
-                    with v_col1:
-                        badge_color = treatment['color_badge']
-                        st.markdown(f"""
-                        <div style="background-color: {badge_color}; padding: 15px; border-radius: 8px; color: white; text-align: center;">
-                            <h3 style="margin:0;">{treatment['severity_title']}</h3>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with v_col2:
-                        st.metric("Multi-Frame Consensus Confidence", f"{final_pred['confidence']*100:.1f}%")
-                        st.progress(float(final_pred['confidence']))
-                    with v_col3:
-                        st.metric("Clinical Risk Level", treatment['risk_level'])
+                # Quantitative Biomarkers of Composite Image
+                st.markdown("##### Extracted IVP Biomarkers from Composite Eye Scan:")
+                mb1, mb2, mb3, mb4, mb5, mb6 = st.columns(6)
+                mb1.metric("Vessel Density", f"{feats.get('vessel_density', 0.0)*100:.2f}%")
+                mb2.metric("Frangi Score", f"{feats.get('frangi_score', 0.0)*100:.2f}%")
+                mb3.metric("Gabor Score", f"{feats.get('gabor_score', 0.0):.1f}")
+                mb4.metric("Exudate Area", f"{feats.get('exudate_ratio', 0.0)*100:.2f}%")
+                mb5.metric("Microaneurysms", f"{feats.get('lesion_count', 0)} spots")
+                csme_stat = "⚠️ High CSME Risk" if feats.get('csme_risk') else "✅ Normal"
+                mb6.metric("CSME Risk", csme_stat)
 
-                    # Quantitative Biomarkers of Composite Image
-                    st.markdown("##### Extracted IVP Biomarkers from Composite Eye Scan:")
-                    mb1, mb2, mb3, mb4, mb5, mb6 = st.columns(6)
-                    mb1.metric("Vessel Density", f"{feats.get('vessel_density', 0.0)*100:.2f}%")
-                    mb2.metric("Frangi Score", f"{feats.get('frangi_score', 0.0)*100:.2f}%")
-                    mb3.metric("Gabor Score", f"{feats.get('gabor_score', 0.0):.1f}")
-                    mb4.metric("Exudate Area", f"{feats.get('exudate_ratio', 0.0)*100:.2f}%")
-                    mb5.metric("Microaneurysms", f"{feats.get('lesion_count', 0)} spots")
-                    csme_stat = "⚠️ High CSME Risk" if feats.get('csme_risk') else "✅ Normal"
-                    mb6.metric("CSME Risk", csme_stat)
+                if feats.get('csme_risk'):
+                    st.error(f"⚠️ **CSME Alert**: Lesion within **{feats.get('fovea_lesion_distance_dd', 0.0):.2f} Disc Diameters** of Fovea center! High risk of central vision loss.")
 
-                    if feats.get('csme_risk'):
-                        st.error(f"⚠️ **CSME Alert**: Lesion within **{feats.get('fovea_lesion_distance_dd', 0.0):.2f} Disc Diameters** of Fovea center! High risk of central vision loss.")
+                st.markdown(f"**Recommended Clinical Action:** {treatment['follow_up']}")
+                st.info(f"**Treatment Guidance:** {treatment['medication_laser']}")
 
-                    st.markdown(f"**Recommended Clinical Action:** {treatment['follow_up']}")
-                    st.info(f"**Treatment Guidance:** {treatment['medication_laser']}")
-
-                # -----------------------------------------------------------------
-                # 3. Interactive Video Frame Scrubber (HUD Inspection)
-                # -----------------------------------------------------------------
-                if len(processed_frames) > 0:
-                    st.markdown("---")
-                    st.subheader("🔍 Interactive Video Frame HUD Inspector")
-                    st.caption("Scrub through individual video frames to inspect real-time focus quality, bounding HUD overlays, and corner Grad-CAM thumbnails.")
-                    selected_frame_idx = st.slider("Select Frame to Inspect", 1, len(processed_frames), 1)
-                    scrub_frame = processed_frames[selected_frame_idx - 1]
-                    st.image(cv2.cvtColor(scrub_frame, cv2.COLOR_BGR2RGB), caption=f"Frame #{selected_frame_idx} with Real-Time HUD Overlay", use_container_width=True)
-
-                # -----------------------------------------------------------------
-                # 4. Temporal Quality & Focus Stability Analytics
-                # -----------------------------------------------------------------
-                if frame_metrics and len(frame_metrics['frame_num']) > 0:
-                    st.markdown("---")
-                    st.subheader("📈 Temporal Quality & Focus Stability Analytics")
-                    chart_df = pd.DataFrame({
-                        'Frame Index': frame_metrics['frame_num'],
-                        'Laplacian Focus Score': frame_metrics['focus_score'],
-                        'Model Confidence (%)': frame_metrics['confidence']
-                    }).set_index('Frame Index')
-                    st.line_chart(chart_df)
-
-                # -----------------------------------------------------------------
-                # 5. Export Video Diagnostic Reports
-                # -----------------------------------------------------------------
+            # -----------------------------------------------------------------
+            # 3. Interactive Video Frame Scrubber (HUD Inspection)
+            # -----------------------------------------------------------------
+            if len(processed_frames) > 0:
                 st.markdown("---")
-                st.subheader("📄 Export Video Diagnostic Report & Scan Video")
+                st.subheader("🔍 Interactive Video Frame HUD Inspector")
+                st.caption("Scrub through individual video frames to inspect real-time focus quality, bounding HUD overlays, and corner Grad-CAM thumbnails.")
+                selected_frame_idx = st.slider("Select Frame to Inspect", 1, len(processed_frames), 1)
+                scrub_frame = processed_frames[selected_frame_idx - 1]
+                st.image(cv2.cvtColor(scrub_frame, cv2.COLOR_BGR2RGB), caption=f"Frame #{selected_frame_idx} with Real-Time HUD Overlay", use_container_width=True)
+
+            # -----------------------------------------------------------------
+            # 4. Temporal Quality & Focus Stability Analytics
+            # -----------------------------------------------------------------
+            if frame_metrics and len(frame_metrics['frame_num']) > 0:
+                st.markdown("---")
+                st.subheader("📈 Temporal Quality & Focus Stability Analytics")
+                chart_df = pd.DataFrame({
+                    'Frame Index': frame_metrics['frame_num'],
+                    'Laplacian Focus Score': frame_metrics['focus_score'],
+                    'Model Confidence (%)': frame_metrics['confidence']
+                }).set_index('Frame Index')
+                st.line_chart(chart_df)
+
+            # -----------------------------------------------------------------
+            # 5. Export Video Diagnostic Reports
+            # -----------------------------------------------------------------
+            st.markdown("---")
+            st.subheader("📄 Export Video Diagnostic Report & Scan Video")
+            
+            v_pdf_path = os.path.join(config.OUTPUT_DIR, f"Video_Report_{patient_name.replace(' ', '_')}.pdf")
+            v_html_path = os.path.join(config.OUTPUT_DIR, f"Video_Report_{patient_name.replace(' ', '_')}.html")
+            
+            if final_pred and composite_frame is not None:
+                generate_pdf_summary_image(patient_info, final_pred, composite_frame, final_pred.get('heatmap_overlay'), v_pdf_path)
+                generate_html_report(patient_info, final_pred, v_html_path)
                 
-                v_pdf_path = os.path.join(config.OUTPUT_DIR, f"Video_Report_{patient_name.replace(' ', '_')}.pdf")
-                v_html_path = os.path.join(config.OUTPUT_DIR, f"Video_Report_{patient_name.replace(' ', '_')}.html")
-                
-                if final_pred and composite_frame is not None:
-                    generate_pdf_summary_image(patient_info, final_pred, composite_frame, final_pred.get('heatmap_overlay'), v_pdf_path)
-                    generate_html_report(patient_info, final_pred, v_html_path)
-                    
-                    b_col1, b_col2, b_col3 = st.columns(3)
-                    with b_col1:
-                        if os.path.exists(v_pdf_path):
-                            with open(v_pdf_path, "rb") as f:
-                                st.download_button("📥 Download Video Diagnostic PDF", data=f, file_name=os.path.basename(v_pdf_path), mime="application/pdf")
-                    with b_col2:
-                        if os.path.exists(v_html_path):
-                            with open(v_html_path, "r", encoding="utf-8") as f:
-                                st.download_button("🌐 Download Video HTML Summary", data=f.read(), file_name=os.path.basename(v_html_path), mime="text/html")
-                    with b_col3:
-                        if os.path.exists(output_video_path):
-                            with open(output_video_path, "rb") as f:
-                                st.download_button("🎞️ Download Annotated Video File", data=f, file_name="annotated_retinal_scan.mp4", mime="video/mp4")
+                b_col1, b_col2, b_col3 = st.columns(3)
+                with b_col1:
+                    if os.path.exists(v_pdf_path):
+                        with open(v_pdf_path, "rb") as f:
+                            st.download_button("📥 Download Video Diagnostic PDF", data=f, file_name=os.path.basename(v_pdf_path), mime="application/pdf")
+                with b_col2:
+                    if os.path.exists(v_html_path):
+                        with open(v_html_path, "r", encoding="utf-8") as f:
+                            st.download_button("🌐 Download Video HTML Summary", data=f.read(), file_name=os.path.basename(v_html_path), mime="text/html")
+                with b_col3:
+                    if os.path.exists(output_video_path):
+                        with open(output_video_path, "rb") as f:
+                            st.download_button("🎞️ Download Annotated Video File", data=f, file_name="annotated_retinal_scan.mp4", mime="video/mp4")
 
