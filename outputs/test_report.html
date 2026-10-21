@@ -14,7 +14,11 @@
             .col { flex: 1; }
             .badge { display: inline-block; padding: 6px 12px; color: #fff; font-weight: bold; border-radius: 20px; font-size: 14px; background: #ff9f1c; }
             .section-title { border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #1d3557; margin-top: 25px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
+            th, td { border: 1px solid #dee2e6; padding: 10px 14px; text-align: left; font-size: 14px; }
+            th { background-color: #f1f3f5; color: #1d3557; }
             ul { line-height: 1.6; }
+            .csme-alert { background-color: #ffe3e3; border-left: 5px solid #e63946; padding: 12px; margin: 15px 0; color: #900; font-weight: bold; }
             .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #adb5bd; border-top: 1px solid #dee2e6; padding-top: 15px; }
         </style>
     </head>
@@ -31,7 +35,7 @@
                     <strong>Age / Sex:</strong> 54 / Male<br>
                 </div>
                 <div class="col">
-                    <strong>Scan Date:</strong> 2026-08-26 14:59:22<br>
+                    <strong>Scan Date:</strong> 2026-10-20 15:14:17<br>
                     <strong>Eye Examined:</strong> Right Eye (OD)<br>
                 </div>
             </div>
@@ -45,13 +49,58 @@
             <strong>Clinical Summary:</strong> Microaneurysms, hard exudates, venous bleeding, and intraretinal hemorrhages detected in 1–3 quadrants.
         </p>
 
+        <div class="csme-alert">⚠️ HIGH RISK: Clinically Significant Macular Edema (CSME) detected! Lesion within 1.0 Disc Diameter of Fovea.</div>
+
+        <h3 class="section-title">Quantitative IVP Biomarker Analysis</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Biomarker / Physical Feature</th>
+                    <th>Measured Quantitative Value</th>
+                    <th>Clinical Interpretation</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Vessel Area Density</strong></td>
+                    <td>12.40%</td>
+                    <td>Retinal vascular coverage index</td>
+                </tr>
+                <tr>
+                    <td><strong>Frangi Vesselness Score</strong></td>
+                    <td>8.20%</td>
+                    <td>Hessian multiscale tubular structure contrast</td>
+                </tr>
+                <tr>
+                    <td><strong>Gabor Wavelet Contrast</strong></td>
+                    <td>34.5</td>
+                    <td>12-Orientation anisotropic vessel sharpness</td>
+                </tr>
+                <tr>
+                    <td><strong>Hard Exudates (Lipid Leaks)</strong></td>
+                    <td>0.80% (6 spots)</td>
+                    <td>Bright yellow lipid exudation density</td>
+                </tr>
+                <tr>
+                    <td><strong>Microaneurysms (Red Lesions)</strong></td>
+                    <td>14 spots</td>
+                    <td>Isolated bleeding capillaries / microvascular lesions</td>
+                </tr>
+                <tr>
+                    <td><strong>CSME Macular Clearance</strong></td>
+                    <td>0.85 DD (<span style='color: #d90429; font-weight: bold;'>⚠️ HIGH CSME RISK (Immediate OCT Required)</span>)</td>
+                    <td>Proximity to Fovea (threshold &le; 1.0 Disc Diameter)</td>
+                </tr>
+            </tbody>
+        </table>
+
         <h3 class="section-title">Evidence-Based Treatment Protocol & Clinical Plan</h3>
         <p><strong>Follow-Up Schedule:</strong> Comprehensive ophthalmologist evaluation within 3 to 6 months.</p>
         <p><strong>Glycemic & Systemic Target:</strong> Tight glycemic control under physician supervision.</p>
         
         <h4>Recommended Clinical Actions:</h4>
         <ul>
-            <li>Refer to a Retina Specialist / Ophthalmologist within 3–6 months.</li><li>Perform Optical Coherence Tomography (OCT) scan to evaluate Macular Edema (DME).</li><li>Assess for signs of Clinically Significant Macular Edema (CSME).</li><li>Optimize systemic hypertension and renal function monitoring.</li>
+            <li>URGENT OCT (Optical Coherence Tomography) Scan to measure Macular Center Thickness.</li><li>Evaluate for Focal Laser Photocoagulation or Anti-VEGF Intravitreal Injection to prevent central vision loss.</li><li>Refer to a Retina Specialist / Ophthalmologist within 3–6 months.</li><li>Perform Optical Coherence Tomography (OCT) scan to evaluate Macular Edema (DME).</li><li>Assess for signs of Clinically Significant Macular Edema (CSME).</li><li>Optimize systemic hypertension and renal function monitoring.</li>
         </ul>
 
         <p><strong>Medication & Laser Therapy Guidance:</strong><br>Anti-VEGF therapy (e.g., Ranibizumab/Aflibercept) or focal laser photocoagulation if Macular Edema is present.</p>

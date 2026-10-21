@@ -1,0 +1,16 @@
+Diabetic Retinopathy Evaluation Benchmark Summary
+Evaluated Samples: 10
+Accuracy: 40.00%
+QWK Score: 0.6667
+
+                           precision    recall  f1-score   support
+
+           Grade 0: No DR       0.00      0.00      0.00         2
+         Grade 1: Mild DR       0.50      1.00      0.67         2
+     Grade 2: Moderate DR       0.33      0.50      0.40         2
+       Grade 3: Severe DR       0.33      0.50      0.40         2
+Grade 4: Proliferative DR       0.00      0.00      0.00         2
+
+                 accuracy                           0.40        10
+                macro avg       0.23      0.40      0.29        10
+             weighted avg       0.23      0.40      0.29        10

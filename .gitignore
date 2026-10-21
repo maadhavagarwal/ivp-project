@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Training cache
+preprocessed_cache/
+
+# System / IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

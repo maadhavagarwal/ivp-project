@@ -16,11 +16,44 @@ import cv2
 from src import config
 from src.ivp_preprocessing import full_ivp_pipeline
 from src.feature_extraction import extract_all_ivp_features
-from src.model import get_model
+from src.model import get_model, load_dr_model
+
+CACHE_DIR = os.path.join(config.BASE_DIR, "preprocessed_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+class FocalLossWithLabelSmoothing(nn.Module):
+    """
+    Focal Loss with Label Smoothing for Imbalanced Ordinal Medical Classification.
+    Focuses on hard-to-classify lesions and prevents overconfidence on adjacent grades.
+    """
+    def __init__(self, alpha=None, gamma=2.0, label_smoothing=0.1):
+        super(FocalLossWithLabelSmoothing, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+
+    def forward(self, inputs, targets):
+        num_classes = inputs.size(1)
+        log_preds = torch.log_softmax(inputs, dim=1)
+        
+        with torch.no_grad():
+            smooth_targets = torch.full_like(inputs, self.label_smoothing / (num_classes - 1))
+            smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.label_smoothing)
+
+        ce_loss = -torch.sum(smooth_targets * log_preds, dim=1)
+        pt = torch.exp(-torch.nn.functional.cross_entropy(inputs, targets, reduction='none'))
+        focal_weight = (1.0 - pt) ** self.gamma
+        
+        if self.alpha is not None:
+            loss = self.alpha[targets] * focal_weight * ce_loss
+        else:
+            loss = focal_weight * ce_loss
+            
+        return loss.mean()
 
 class DRDataset(Dataset):
     """
-    Custom Dataset for Diabetic Retinopathy Fundus Images with IVP Preprocessing & Data Augmentation.
+    Custom Dataset for Diabetic Retinopathy Fundus Images with Caching & Data Augmentation.
     """
     def __init__(self, image_paths, labels, is_train=True):
         self.image_paths = image_paths
@@ -34,12 +67,23 @@ class DRDataset(Dataset):
         img_path = self.image_paths[idx]
         label = self.labels[idx]
         
-        try:
-            # Apply Phase 1 IVP Preprocessing pipeline
-            res = full_ivp_pipeline(img_path)
-            img_rgb = res['final_processed']
-        except Exception:
-            img_rgb = np.zeros((config.IMAGE_SIZE[0], config.IMAGE_SIZE[1], 3), dtype=np.uint8)
+        # Fast Disk Cache for IVP Preprocessing
+        base_name = os.path.splitext(os.path.basename(img_path))[0]
+        cache_file = os.path.join(CACHE_DIR, f"{base_name}.npy")
+        
+        if os.path.exists(cache_file):
+            try:
+                img_rgb = np.load(cache_file)
+            except Exception:
+                res = full_ivp_pipeline(img_path)
+                img_rgb = res['final_processed']
+        else:
+            try:
+                res = full_ivp_pipeline(img_path)
+                img_rgb = res['final_processed']
+                np.save(cache_file, img_rgb)
+            except Exception:
+                img_rgb = np.zeros((config.IMAGE_SIZE[0], config.IMAGE_SIZE[1], 3), dtype=np.uint8)
 
         # Convert HWC numpy (0..255) to PIL Image for augmentations
         pil_img = Image.fromarray(img_rgb)
@@ -137,23 +181,32 @@ def train_deep_learning_model(epochs=8, sample_limit=800):
     if len(image_paths) == 0:
         raise RuntimeError("No image files found in dataset directories!")
 
-    # Subsample for balanced efficient CPU training if dataset is large
-    if len(image_paths) > sample_limit:
-        print(f"\nSampling {sample_limit} images across classes for extended training...")
-        idx = np.random.choice(len(image_paths), sample_limit, replace=False)
-        image_paths = [image_paths[i] for i in idx]
-        labels = [labels[i] for i in idx]
+    # Balanced class stratification across all 5 classes
+    balanced_paths = []
+    balanced_labels = []
+    max_per_class = max(1, sample_limit // config.NUM_CLASSES)
+    print(f"\nPerforming balanced class sampling (up to {max_per_class} images per class)...")
+    
+    for cid in range(config.NUM_CLASSES):
+        cls_paths = [p for p, l in zip(image_paths, labels) if l == cid]
+        if len(cls_paths) > max_per_class:
+            selected = np.random.choice(cls_paths, max_per_class, replace=False).tolist()
+        else:
+            selected = cls_paths
+        balanced_paths.extend(selected)
+        balanced_labels.extend([cid] * len(selected))
+        print(f" - Class {cid} ({config.CLASS_NAMES[cid]}): {len(selected)} samples")
 
     train_paths, val_paths, train_y, val_y = train_test_split(
-        image_paths, labels, test_size=0.2, random_state=42, stratify=labels
+        balanced_paths, balanced_labels, test_size=0.2, random_state=42, stratify=balanced_labels
     )
-    print(f"Dataset split: {len(train_paths)} Train | {len(val_paths)} Validation")
+    print(f"\nDataset split: {len(train_paths)} Train | {len(val_paths)} Validation")
     
     # 1. Train Classical Baseline
     train_classical_baseline(train_paths, train_y, val_paths, val_y)
     
     # 2. Train Deep Learning PyTorch Model
-    print("\n--- Training Phase 3: Deep Learning Neural Network (Extended Epochs) ---")
+    print("\n--- Training Phase 3: Deep Learning Neural Network (Focal Loss + Cosine Schedule) ---")
     train_ds = DRDataset(train_paths, train_y, is_train=True)
     val_ds = DRDataset(val_paths, val_y, is_train=False)
     
@@ -161,7 +214,7 @@ def train_deep_learning_model(epochs=8, sample_limit=800):
     val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=0)
     
     device = torch.device(config.DEVICE)
-    model = get_model(num_classes=config.NUM_CLASSES).to(device)
+    model = get_model(num_classes=config.NUM_CLASSES, pretrained=True, backbone="mobilenet_v3").to(device)
     
     # Compute class weights for loss function
     class_counts = np.bincount(train_y, minlength=config.NUM_CLASSES)
@@ -169,11 +222,12 @@ def train_deep_learning_model(epochs=8, sample_limit=800):
     weights = weights / np.sum(weights)
     class_weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
     
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    criterion = FocalLossWithLabelSmoothing(alpha=class_weights_tensor, gamma=2.0, label_smoothing=0.1)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
 
     best_val_acc = 0.0
+    best_qwk = 0.0
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -226,16 +280,17 @@ def train_deep_learning_model(epochs=8, sample_limit=800):
         
         print(f"==> Epoch {epoch}/{epochs} Finished | Train Acc: {epoch_acc*100:.2f}% | Val Loss: {val_loss/val_total:.4f} | Val Acc: {val_acc*100:.2f}% | Val QWK: {val_qwk:.4f}")
         
-        if val_acc >= best_val_acc:
-            best_val_acc = val_acc
+        if val_acc >= best_val_acc or val_qwk > best_qwk:
+            best_val_acc = max(best_val_acc, val_acc)
+            best_qwk = max(best_qwk, val_qwk)
             torch.save(model.state_dict(), config.MODEL_PATH)
-            print(f"    [Checkpoint Saved] New Best Validation Accuracy: {best_val_acc*100:.2f}%")
+            print(f"    [Checkpoint Saved] New Best Validation Accuracy: {best_val_acc*100:.2f}% | QWK: {best_qwk:.4f}")
             
     print(f"\n=======================================================")
     print(f"  Extended Training Completed!")
-    print(f"  Best Validation Accuracy achieved: {best_val_acc * 100:.2f}%")
+    print(f"  Best Validation Accuracy: {best_val_acc * 100:.2f}% | Best QWK: {best_qwk:.4f}")
     print(f"  Saved PyTorch model weights to: {config.MODEL_PATH}")
     print(f"=======================================================")
 
 if __name__ == "__main__":
-    train_deep_learning_model(epochs=6, sample_limit=600)
+    train_deep_learning_model(epochs=6, sample_limit=800)

@@ -83,11 +83,25 @@ TREATMENT_PROTOCOLS = {
     }
 }
 
-def get_treatment_advisory(severity_class):
+def get_treatment_advisory(severity_class, csme_risk=False):
     """
-    Returns clinical treatment dictionary for specified severity class (0-4).
+    Returns clinical treatment dictionary for specified severity class (0-4)
+    with dynamic CSME Macular Edema risk assessment.
     """
     cls = int(severity_class)
     if cls not in TREATMENT_PROTOCOLS:
         cls = 0
-    return TREATMENT_PROTOCOLS[cls]
+
+    import copy
+    protocol = copy.deepcopy(TREATMENT_PROTOCOLS[cls])
+
+    if csme_risk:
+        protocol['csme_alert'] = "⚠️ HIGH RISK: Clinically Significant Macular Edema (CSME) detected! Lesion within 1.0 Disc Diameter of Fovea."
+        protocol['clinical_actions'].insert(0, "URGENT OCT (Optical Coherence Tomography) Scan to measure Macular Center Thickness.")
+        protocol['clinical_actions'].insert(1, "Evaluate for Focal Laser Photocoagulation or Anti-VEGF Intravitreal Injection to prevent central vision loss.")
+        if cls <= 1:
+            protocol['risk_level'] = "Elevated Risk / Macular Edema Alert"
+    else:
+        protocol['csme_alert'] = "Normal Macular Foveal Clearance (No CSME lesion within 1.0 Disc Diameter of Fovea)."
+
+    return protocol
