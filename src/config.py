@@ -44,6 +44,12 @@ CLASS_COLORS = {
     4: "#9d0208"   # Dark Red / Emergency
 }
 
+# System Resource & CPU Throttling (Leaves CPU cores free for Windows & browser so system never hangs)
+MAX_CPU_THREADS = max(1, min(4, (os.cpu_count() or 4) - 1))
+
+# Video Memory Optimization
+MAX_VIDEO_PREVIEW_FRAMES = 50  # Cap in-memory UI scrubber frames to prevent RAM spikes
+
 # Image Preprocessing Configuration
 IMAGE_SIZE = (224, 224)
 BEN_GRAHAM_SIGMA = 10

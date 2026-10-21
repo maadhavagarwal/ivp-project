@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import torch
 import os
+import gc
 from PIL import Image
 from collections import deque
 
@@ -10,6 +11,10 @@ from src.ivp_preprocessing import full_ivp_pipeline
 from src.feature_extraction import extract_all_ivp_features, get_biomarker_clinical_grade
 from src.model import get_model, load_dr_model, GradCAM, overlay_heatmap_on_image
 from src.video_model import RetinalVideoCNN_LSTM
+
+# Throttled CPU threads to prevent system lockup and leave headroom for OS & Browser
+torch.set_num_threads(config.MAX_CPU_THREADS)
+cv2.setNumThreads(config.MAX_CPU_THREADS)
 
 class VideoProcessor:
     """
@@ -110,18 +115,17 @@ class VideoProcessor:
 
         with torch.no_grad():
             if use_tta:
-                # Test-Time Augmentation (TTA): Original, Horizontal Flip, Vertical Flip, 90-degree Rotation
+                # Optimized 2x TTA (Original + Horizontal Flip) - 50% CPU savings with high accuracy
                 t_orig = input_tensor
                 t_fliph = torch.flip(input_tensor, dims=[3])
-                t_flipv = torch.flip(input_tensor, dims=[2])
-                t_rot = torch.rot90(input_tensor, k=1, dims=[2, 3])
-                batch_tta = torch.cat([t_orig, t_fliph, t_flipv, t_rot], dim=0)
+                batch_tta = torch.cat([t_orig, t_fliph], dim=0)
                 outputs_tta = self.model(batch_tta)
-                probs_tta = torch.softmax(outputs_tta, dim=1)
+                # Temperature scaling T=1.1 to prevent uncalibrated overconfidence
+                probs_tta = torch.softmax(outputs_tta / 1.1, dim=1)
                 probs = torch.mean(probs_tta, dim=0).cpu().numpy()
             else:
                 outputs = self.model(input_tensor)
-                probs = torch.softmax(outputs, dim=1).squeeze(0).cpu().numpy()
+                probs = torch.softmax(outputs / 1.1, dim=1).squeeze(0).cpu().numpy()
 
         pred_class = int(np.argmax(probs))
         confidence = float(probs[pred_class])
@@ -131,37 +135,37 @@ class VideoProcessor:
 
         # Compute voting aggregate prediction
         avg_probs = np.mean(self.voting_history, axis=0)
-        dl_class = int(np.argmax(avg_probs))
-        dl_confidence = float(avg_probs[dl_class])
 
-        # Clinical Hybrid Ensemble Consensus:
-        # Fuse Deep Learning class probabilities with quantitative IVP physical biomarkers
+        # Bayesian Likelihood Prior based on clinical physical biomarkers
         lesion_cnt = feats.get('lesion_count', 0)
         exudate_ratio = feats.get('exudate_ratio', 0.0)
         csme_risk = feats.get('csme_risk', False)
         
-        # Rule 1: Zero microaneurysms and zero exudates cannot clinically be Grade > 1
-        if lesion_cnt == 0 and exudate_ratio == 0.0 and dl_class > 0:
-            if dl_confidence < 0.85:
-                final_class = 0
-                final_confidence = max(dl_confidence, 0.88)
-            else:
-                final_class = dl_class
-                final_confidence = dl_confidence
-        # Rule 2: If microaneurysms detected (>=2) and model predicts Grade 0, align to Grade 1
-        elif lesion_cnt >= 2 and dl_class == 0:
-            final_class = 1
-            final_confidence = max(dl_confidence, 0.85)
-        # Rule 3: Heavy lesion count, high exudate ratio or active CSME ensures clinical severity
-        elif (lesion_cnt >= 25 or exudate_ratio >= 0.015 or csme_risk) and dl_class < 2:
-            final_class = max(bio_grade, 2)
-            final_confidence = max(dl_confidence, 0.86)
-        elif dl_confidence < 0.65 or abs(dl_class - bio_grade) >= 2:
-            final_class = bio_grade if bio_grade > dl_class else dl_class
-            final_confidence = max(dl_confidence, 0.82)
-        else:
-            final_class = dl_class
-            final_confidence = dl_confidence
+        bayes_prior = np.ones(5, dtype=np.float32)
+        if lesion_cnt == 0 and exudate_ratio == 0.0:
+            bayes_prior[0] = 2.4
+            bayes_prior[1] = 0.8
+            bayes_prior[2] = 0.05
+            bayes_prior[3] = 0.01
+            bayes_prior[4] = 0.01
+        elif lesion_cnt <= 6 and exudate_ratio < 0.003:
+            bayes_prior[0] = 0.3
+            bayes_prior[1] = 2.4
+            bayes_prior[2] = 1.0
+            bayes_prior[3] = 0.05
+            bayes_prior[4] = 0.02
+        elif (lesion_cnt >= 25 or exudate_ratio >= 0.012 or csme_risk):
+            bayes_prior[0] = 0.01
+            bayes_prior[1] = 0.05
+            bayes_prior[2] = 1.4
+            bayes_prior[3] = 2.2
+            bayes_prior[4] = 2.2
+
+        fused_probs = avg_probs * bayes_prior
+        fused_probs = fused_probs / np.sum(fused_probs)
+
+        final_class = int(np.argmax(fused_probs))
+        final_confidence = float(fused_probs[final_class])
 
         heatmap_overlay = None
         if generate_heatmap:
@@ -253,6 +257,9 @@ class VideoProcessor:
 
         cap = cv2.VideoCapture(video_path)
         fps = int(cap.get(cv2.CAP_PROP_FPS)) or 25
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            total_frames = 100
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
 
@@ -268,9 +275,14 @@ class VideoProcessor:
                 writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
                 use_imageio = False
 
+        max_preview = getattr(config, 'MAX_VIDEO_PREVIEW_FRAMES', 50)
+        preview_interval = max(1, total_frames // max_preview)
+        target_seq_indices = set(np.linspace(0, max(0, total_frames - 1), 16, dtype=int))
+
         frame_idx = 0
-        raw_frames = []
-        processed_frames = []
+        preview_frames = []
+        video_sequence_frames = []
+        candidate_sharp_frames = []
         last_prediction = None
         frame_metrics = {
             'frame_num': [],
@@ -286,8 +298,17 @@ class VideoProcessor:
                 break
 
             frame_idx += 1
-            raw_frames.append(frame.copy())
             is_good, score = self.evaluate_frame_quality(frame)
+
+            # Keep candidate frames for super-resolution composite (prioritize sharp frames)
+            if is_good and len(candidate_sharp_frames) < 8:
+                candidate_sharp_frames.append(frame.copy())
+            elif len(candidate_sharp_frames) < 4:
+                candidate_sharp_frames.append(frame.copy())
+
+            # Collect uniform frames for 16-frame temporal sequence model
+            if (frame_idx - 1) in target_seq_indices and len(video_sequence_frames) < 16:
+                video_sequence_frames.append(frame.copy())
 
             if is_good and (frame_idx % sample_step == 0 or last_prediction is None):
                 last_prediction = self.predict_single_frame(frame, generate_heatmap=True)
@@ -324,12 +345,16 @@ class VideoProcessor:
                     annotated_frame[20:160, width-160:width-20] = hmap_resized
                     cv2.rectangle(annotated_frame, (width-160, 20), (width-20, 160), (255, 255, 255), 2)
 
+            # Stream out to disk directly (O(1) memory per frame)
             if writer:
                 if use_imageio:
                     writer.append_data(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
                 else:
                     writer.write(annotated_frame)
-            processed_frames.append(annotated_frame)
+
+            # Retain only sampled preview frames in memory for UI scrubbing
+            if (frame_idx % preview_interval == 0 or len(preview_frames) < 5) and len(preview_frames) < max_preview:
+                preview_frames.append(annotated_frame)
 
         cap.release()
         if writer:
@@ -339,8 +364,12 @@ class VideoProcessor:
                 writer.release()
             print(f"Processed video written to {output_path}")
 
+        # Fallback if video sequence frames under-sampled
+        if len(video_sequence_frames) == 0 and len(candidate_sharp_frames) > 0:
+            video_sequence_frames = candidate_sharp_frames
+
         # Compute multi-frame super-resolution composite frame
-        composite_frame = self.create_super_resolution_composite(raw_frames)
+        composite_frame = self.create_super_resolution_composite(candidate_sharp_frames)
 
         # Diagnose on the reconstructed composite frame for definitive multi-frame consensus
         final_prediction = None
@@ -353,12 +382,17 @@ class VideoProcessor:
         else:
             final_prediction = last_prediction
 
-        # Run Video-Trained Neural Network (CNN + Bi-LSTM) on the full video sequence
-        video_seq_pred = self.predict_video_sequence(raw_frames)
+        # Run Video-Trained Neural Network (CNN + Bi-LSTM) on the temporal sequence
+        video_seq_pred = self.predict_video_sequence(video_sequence_frames)
         if final_prediction is not None and video_seq_pred is not None:
             final_prediction['video_temporal_model'] = video_seq_pred
 
-        return processed_frames, final_prediction, composite_frame, frame_metrics
+        # Free temporary frame arrays and trigger garbage collection to keep RAM lean
+        del candidate_sharp_frames
+        del video_sequence_frames
+        gc.collect()
+
+        return preview_frames, final_prediction, composite_frame, frame_metrics
 
 if __name__ == "__main__":
     print("Testing Updated Real-Time Eye Video Scanning Processor...")

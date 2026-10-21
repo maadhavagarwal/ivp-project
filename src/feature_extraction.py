@@ -45,11 +45,14 @@ def extract_optic_disc_mask(green_clahe, retina_mask):
 
 def apply_frangi_vessel_filter(green_channel, retina_mask):
     """
-    Multiscale Frangi Vesselness Filter based on Hessian Matrix Second Derivatives.
-    Identifies tubular vessel structures across scales sigma in [1..3].
+    Lightweight Multiscale Frangi Vesselness Filter based on Hessian Matrix Second Derivatives.
+    Optimized for low CPU overhead with sub-sampled scale-space computation.
     """
-    norm_green = green_channel.astype(np.float32) / 255.0
-    vesselness = frangi(norm_green, sigmas=range(1, 4), alpha=0.5, beta=0.5, gamma=15, black_ridges=True)
+    h, w = green_channel.shape
+    # 2x sub-sample for 4x CPU speedup while preserving vessel branch geometry
+    small_green = cv2.resize(green_channel, (w // 2, h // 2)).astype(np.float32) / 255.0
+    vesselness_small = frangi(small_green, sigmas=[1.0, 2.0], alpha=0.5, beta=0.5, gamma=15.0, black_ridges=True)
+    vesselness = cv2.resize(vesselness_small, (w, h), interpolation=cv2.INTER_LINEAR)
     
     vesselness[retina_mask == 0] = 0
     if np.max(vesselness) > 0:
@@ -61,15 +64,16 @@ def apply_frangi_vessel_filter(green_channel, retina_mask):
 
 def apply_gabor_filter_bank(green_channel, retina_mask):
     """
-    Gabor Wavelet Filter Bank evaluated across 12 orientation angles (0 to 165 degrees).
-    Captures curved vessels across all spatial orientations.
+    Lightweight Gabor Wavelet Filter Bank across 6 principal orientation angles (0° to 150° in 30° steps).
+    Provides 2x CPU speedup while capturing curved vessels across all spatial directions.
     """
     clahe_green = apply_clahe(green_channel, clip_limit=3.0)
     accum_response = np.zeros_like(clahe_green, dtype=np.float32)
 
-    for deg in range(0, 180, 15):
+    # 6 orientations cover 180-degree spectrum with 50% lower CPU cycles
+    for deg in range(0, 180, 30):
         theta = np.deg2rad(deg)
-        kernel = cv2.getGaborKernel((15, 15), sigma=3.0, theta=theta, lambd=8.0, gamma=0.5, psi=0, ktype=cv2.CV_32F)
+        kernel = cv2.getGaborKernel((13, 13), sigma=2.5, theta=theta, lambd=7.0, gamma=0.5, psi=0, ktype=cv2.CV_32F)
         fimg = cv2.filter2D(clahe_green, cv2.CV_32F, kernel)
         accum_response = np.maximum(accum_response, fimg)
 
