@@ -202,9 +202,16 @@ class VideoProcessor:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
 
         writer = None
+        use_imageio = False
         if output_path:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            try:
+                import imageio
+                writer = imageio.get_writer(output_path, fps=fps, codec='libx264', pixelformat='yuv420p', quality=8, macro_block_size=None)
+                use_imageio = True
+            except Exception:
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+                use_imageio = False
 
         frame_idx = 0
         raw_frames = []
@@ -263,12 +270,18 @@ class VideoProcessor:
                     cv2.rectangle(annotated_frame, (width-160, 20), (width-20, 160), (255, 255, 255), 2)
 
             if writer:
-                writer.write(annotated_frame)
+                if use_imageio:
+                    writer.append_data(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
+                else:
+                    writer.write(annotated_frame)
             processed_frames.append(annotated_frame)
 
         cap.release()
         if writer:
-            writer.release()
+            if use_imageio:
+                writer.close()
+            else:
+                writer.release()
             print(f"Processed video written to {output_path}")
 
         # Compute multi-frame super-resolution composite frame
