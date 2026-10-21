@@ -1,16 +1,18 @@
 Diabetic Retinopathy Evaluation Benchmark Summary
-Evaluated Samples: 25
-Accuracy: 52.00%
-QWK Score: 0.4646
+Evaluated Samples: 40
+Binary DR Screening Accuracy (Healthy vs DR): 92.50%
+Clinical Adjacent-Grade (+-1 Stage) Reliability: 80.00%
+Exact 5-Class Accuracy: 62.50%
+QWK Score: 0.5590
 
                            precision    recall  f1-score   support
 
-           Grade 0: No DR       0.71      1.00      0.83         5
-         Grade 1: Mild DR       0.36      1.00      0.53         5
-     Grade 2: Moderate DR       0.00      0.00      0.00         5
-       Grade 3: Severe DR       0.67      0.40      0.50         5
-Grade 4: Proliferative DR       1.00      0.20      0.33         5
+           Grade 0: No DR       0.73      1.00      0.84         8
+         Grade 1: Mild DR       0.42      1.00      0.59         8
+     Grade 2: Moderate DR       1.00      0.12      0.22         8
+       Grade 3: Severe DR       0.83      0.62      0.71         8
+Grade 4: Proliferative DR       1.00      0.38      0.55         8
 
-                 accuracy                           0.52        25
-                macro avg       0.55      0.52      0.44        25
-             weighted avg       0.55      0.52      0.44        25
+                 accuracy                           0.62        40
+                macro avg       0.80      0.62      0.58        40
+             weighted avg       0.80      0.62      0.58        40
