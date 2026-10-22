@@ -241,6 +241,31 @@ if scan_type == "📸 Retinal Fundus Image Scan":
                 
             st.warning(f"**Medication / Laser Guidance:** {treatment['medication_laser']}")
 
+        # Patient Care Suggestions & Practical Recommendations
+        st.markdown("##### 🩺 Patient Recommendations & Lifestyle Suggestions")
+        sug_c1, sug_c2, sug_c3 = st.columns(3)
+        with sug_c1:
+            st.markdown("""
+            **🥗 Dietary & Lifestyle Advice:**
+            - **Glycemic Index:** Low GI diet rich in fiber, legumes, and leafy vegetables.
+            - **Blood Pressure:** Limit sodium intake (<2,000 mg/day) to prevent retinal vessel leakage.
+            - **Physical Activity:** 30 mins moderate aerobic exercise daily (avoid heavy valsalva lifting in severe DR).
+            """)
+        with sug_c2:
+            st.markdown("""
+            **👁️ Vision Care & Red Flags:**
+            - **Urgent Signs:** Sudden flash of light, dark shower of floaters, or sudden dark shadow curtain.
+            - **Reading & Glare:** Use anti-glare screens and adequate ambient lighting.
+            - **Medication Adherence:** Never skip prescribed diabetes or hypertensive medications.
+            """)
+        with sug_c3:
+            st.markdown("""
+            **📅 Further Medical Steps & Specialist Care:**
+            - **Comprehensive Exam:** Dilated fundus examination every 3-6 months.
+            - **Advanced Imaging:** Optical Coherence Tomography (OCT) & Fluorescein Angiography (FFA).
+            - **Endocrinology Check:** Quarterly HbA1c review with managing endocrinologist.
+            """)
+
         with st.expander("💡 Understanding Stage 3 & 4: How AI Predictions & Clinical Guidelines are Selected"):
             st.markdown("""
             * **EfficientNetV2 / MobileNetV3 Neural Network**: Pre-trained deep learning model calculates class probabilities across 5 DR stages.
@@ -270,7 +295,7 @@ if scan_type == "📸 Retinal Fundus Image Scan":
                     )
         with btn_col2:
             if os.path.exists(html_out_path):
-                with open(html_out_path, "r") as f:
+                with open(html_out_path, "r", encoding="utf-8") as f:
                     st.download_button(
                         label="🌐 Download HTML Diagnostic Summary",
                         data=f.read(),
@@ -419,6 +444,27 @@ else:
                     vtm = final_pred['video_temporal_model']
                     st.info(f"🧠 **Temporal Video Model (CNN + Bi-LSTM Trained on 125 Video Clips)**: Direct Video Sequence Diagnosis = **Grade {vtm['video_class_id']} ({vtm['video_class_name']})** ({vtm['video_confidence']*100:.1f}% sequence confidence).")
 
+                # Show Composite Fundus Image with Segmented Vessel & Biomarker Overlays directly above metrics
+                if composite_frame is not None:
+                    st.markdown("##### 👁️ Composite Eye Scan & Feature Extraction View:")
+                    comp_rgb = cv2.cvtColor(composite_frame, cv2.COLOR_BGR2RGB)
+                    c_view1, c_view2, c_view3 = st.columns(3)
+                    with c_view1:
+                        st.image(comp_rgb, caption="Reconstructed Clear Composite Fundus", use_container_width=True)
+                    with c_view2:
+                        if final_pred.get('heatmap_overlay') is not None:
+                            st.image(final_pred['heatmap_overlay'], caption="Grad-CAM Lesion Heatmap Overlay", use_container_width=True)
+                        else:
+                            st.image(comp_rgb, caption="Fundus Scan", use_container_width=True)
+                    with c_view3:
+                        masks = final_pred.get('masks', {})
+                        if masks and 'vessels' in masks:
+                            st.image(masks['vessels'], caption="Segmented Blood Vessel Network (Frangi/Gabor)", use_container_width=True)
+                        elif masks and 'green_clahe' in masks:
+                            st.image(masks['green_clahe'], caption="Green-CLAHE Contrast Enhanced", use_container_width=True)
+                        else:
+                            st.image(comp_rgb, caption="Processed Scan", use_container_width=True)
+
                 # Quantitative Biomarkers of Composite Image
                 st.markdown("##### Extracted IVP Biomarkers from Composite Eye Scan:")
                 mb1, mb2, mb3, mb4, mb5, mb6 = st.columns(6)
@@ -436,6 +482,31 @@ else:
                 st.markdown(f"**Recommended Clinical Action:** {treatment['follow_up']}")
                 st.info(f"**Treatment Guidance:** {treatment['medication_laser']}")
 
+                # Patient Suggestions & Further Medical Recommendations
+                st.markdown("##### 🩺 Patient Recommendations & Action Plan")
+                vsug1, vsug2, vsug3 = st.columns(3)
+                with vsug1:
+                    st.markdown("""
+                    **🥗 Lifestyle & Metabolic Control:**
+                    - Target strict **HbA1c < 7.0%** and blood pressure < 130/80 mmHg.
+                    - Low-glycemic, high-fiber Mediterranean diet to prevent capillary rupture.
+                    - Routine aerobic activity to enhance microvascular circulation.
+                    """)
+                with vsug2:
+                    st.markdown("""
+                    **👁️ Vision Precautions & Warning Signs:**
+                    - Watch for sudden dark spiderwebs/floaters or central blurred spots.
+                    - Avoid prolonged high-strain eye activity without adequate rest.
+                    - Immediate ophthalmology consultation if vision dims suddenly.
+                    """)
+                with vsug3:
+                    st.markdown("""
+                    **📋 Next Clinical Follow-up Steps:**
+                    - Follow-up dilated fundus evaluation as per risk protocol.
+                    - Confirmatory macular OCT (Optical Coherence Tomography) scan.
+                    - Annual or bi-annual renal panel and lipid profile evaluation.
+                    """)
+
             # -----------------------------------------------------------------
             # 3. Interactive Video Frame Scrubber (HUD Inspection)
             # -----------------------------------------------------------------
@@ -446,6 +517,15 @@ else:
                 selected_frame_idx = st.slider("Select Frame to Inspect", 1, len(processed_frames), 1)
                 scrub_frame = processed_frames[selected_frame_idx - 1]
                 st.image(cv2.cvtColor(scrub_frame, cv2.COLOR_BGR2RGB), caption=f"Frame #{selected_frame_idx} with Real-Time HUD Overlay", use_container_width=True)
+
+                # Show All Extracted Frames Grid
+                with st.expander(f"🎞️ View All Extracted Video Frames ({len(processed_frames)} Frames)", expanded=False):
+                    st.caption("All discrete frames sampled and analyzed by the temporal vision system:")
+                    grid_cols = st.columns(4)
+                    for idx, frame_item in enumerate(processed_frames):
+                        col = grid_cols[idx % 4]
+                        with col:
+                            col.image(cv2.cvtColor(frame_item, cv2.COLOR_BGR2RGB), caption=f"Frame #{idx + 1}", use_container_width=True)
 
             # -----------------------------------------------------------------
             # 4. Temporal Quality & Focus Stability Analytics
